@@ -1,11 +1,15 @@
 #!/bin/bash
 
-name="GPT4Scene-qwen2vl_full_sft_mark_32_3D_img512"
+name="Qwen2.5-VL-7B-Instruct"
 export PYTHONPATH=.
 
 gpu_list="${CUDA_VISIBLE_DEVICES:-0}"
 IFS=',' read -ra GPULIST <<< "$gpu_list"
 export CHUNKS=${#GPULIST[@]}
+
+# debug
+export CUDA_LAUNCH_BLOCKING=1
+export TORCH_USE_CUDA_DSA=1
 
 echo "Evaluating task in $CHUNKS GPUs"
 
@@ -14,14 +18,12 @@ BASE_ARGS=(
     "evaluate" "True"
     "model" "qwenvl"
     "batch_size" "4"
-    "num_workers" "16"
+    "num_workers" "0"
     "model_path" "./model_outputs/${name}"
-    "scene_anno" "./evaluate/annotation/selected_images_mark_3D_val_32.json"
     "save_interval" "2"
 )
 
-tasks=("scanqa" "sqa3d" "scan2cap" "scanrefer" "multi3dref")
-
+tasks=("mira_hallu")
 for task in "${tasks[@]}"; do
     echo "Starting task: $task"
     for IDX in $(seq 0 $((CHUNKS-1))); do
@@ -29,21 +31,16 @@ for task in "${tasks[@]}"; do
         ARGS=(
             "${BASE_ARGS[@]}"
             "val_tag" "$task"
-            "output_dir" "eval_outputs/outputs_3D_mark/${name}/"
+            "output_dir" "eval_outputs"
             "num_chunks" "$CHUNKS"
             "chunk_idx" "$IDX"
-            "calculate_score_tag" "scanqa#sqa3d#scan2cap#scanrefer#multi3dref"
+            "device" "cuda:${GPULIST[$IDX]}"
         )
-
-        CUDA_VISIBLE_DEVICES=${GPULIST[$IDX]} python evaluate/infer.py "${ARGS[@]}" &
+        echo "ARGS: ${ARGS[@]}"
+        CUDA_VISIBLE_DEVICES=${GPULIST[$IDX]} python3 evaluate/infer.py "${ARGS[@]}" &
     done
-
     wait
-    echo "Finished task: $task"
+    echo "Finish task: $task!"
 done
-
 wait
-
-CUDA_VISIBLE_DEVICES=0 python evaluate/calculate_scores.py "${ARGS[@]}"
-
-wait
+echo "All tasks done!"

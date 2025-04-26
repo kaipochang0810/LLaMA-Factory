@@ -27,53 +27,44 @@ def preprocess_image_nearest(image_path: str, image_resolution: int, perform_res
 
 
 
-def bulid_message(prompt, config, eval_name, bev_mf_paths):
-    """
-    Build the message to send to the OpenAI API. If config specifies only BEV, the function
-    will use only the BEV image. Otherwise, it defaults to using both if available.
-    """
-    # if eval_name in ['scanrefer', 'multi3dref'] and config.base_model:
-    #     prompt += " Carefully read and understand the prompt's description of the object(s). Indicate with 'Yes' if there are objects that match the description, followed by their IDs in the format '<OBJ###>' (e.g., '<OBJ001>, <OBJ002>'). If there are multiple matching objects, separate them with commas. Respond with 'No' if no objects match the description."
-    user_prompt = []
-
-    for bev_mf_path in bev_mf_paths:
-        train_height, train_width = preprocess_image_nearest(bev_mf_path, config.resolution)
-        user_prompt.append({"type": "image", "image": bev_mf_path, "resized_height": train_height, "resized_width": train_width})
-
-    user_prompt.append({"type": "text", "text": prompt})
-
+def build_message(prompt, video_fp):
     message = []
+    user_prompt = [
+        {"type": "video", "video": video_fp, "nframes": 64, "resized_height": 384, "resized_width": 384+28},  # TODO: Hardcode for saving object patch preprocessing time
+        {"type": "text", "text": prompt}
+    ]
+    
     message.append({"role": "user",  "content": user_prompt})
     return message
 
-def get_response_qwen(model, processor, prompts, bev_mf_paths, config, eval_name):
+def get_response_qwen(model, processor, prompts, video_fps, config, eval_name):
             
     messages = []
-    for prompt, bev_mf_path in zip(prompts, bev_mf_paths):
-        messages.append(bulid_message(prompt, config, eval_name, bev_mf_path))
+    for prompt, video_fp in zip(prompts, video_fps):
+        messages.append(build_message(prompt, video_fp))
 
     # Preparation for inference
     texts = [
         processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
         for msg in messages
     ]
-    image_inputs, video_inputs = process_vision_info(messages)
+    image_inputs, video_inputs, video_kwargs = process_vision_info(messages, return_video_kwargs=True)
     inputs = processor(
         text=texts,
         images=image_inputs,
         videos=video_inputs,
         padding=True,
         return_tensors="pt",
+        **video_kwargs
     )
     inputs = inputs.to("cuda")
-
+    # inputs = dict_keys(['input_ids', 'attention_mask', 'pixel_values_videos', 'video_grid_thw', 'second_per_grid_ts'])
     # Batch Inference
-    generated_ids = model.generate(**inputs, max_new_tokens=128)
+    generated_ids = model.generate(**inputs, max_new_tokens=512, do_sample=False, num_beams=1)
     generated_ids_trimmed = [
         out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
     ]
     output_texts = processor.batch_decode(
         generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
     )
-
     return output_texts

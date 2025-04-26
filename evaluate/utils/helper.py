@@ -3,7 +3,19 @@ import os
 from collections import defaultdict
 import json
 import csv
+import time
 import numpy as np
+
+
+def device_0_breakpoint(device):
+    if device == "cuda:0":
+        breakpoint()
+    else:
+        while True:
+            time.sleep(60)
+
+def device_print(message, device):
+    print(f"[{device}]: {message}")
 
 # refer to LEO: embodied-generalist
 # https://github.com/embodied-generalist/embodied-generalist/blob/477dc44b8b18dbfbe6823c307436d896ec8b062e/data/data_utils.py#L322-L379
